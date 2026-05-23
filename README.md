@@ -18,3 +18,5 @@ Issues and pull requests are welcome once the contribution guide is published. U
 - `wellworth-blocks` — free companion blocks plugin (GPL-2.0-or-later).
 - `wellworth-pro` — paid Pro plugin suite (proprietary, GPL-compatible).
 - `wellworth-dashboard` — Next.js control plane.
+
+<!-- t006-d-verify: progress-check gate (DO NOT MERGE) -->

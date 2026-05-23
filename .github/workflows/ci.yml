@@ -1,0 +1,145 @@
+# wellworth-theme — CI (PLAN T006 §B; SPECS §19, §20).
+#
+# Scaffold-aware: every job is guarded by `hashFiles()` so the workflow
+# stays green on the empty scaffold and trips the moment T036 lands
+# package.json / style.css / templates/ etc. PHP is intentionally
+# absent — themes are HTML + JSON; PHP lives in the Pro plugin.
+#
+# Matrix discipline: floor + current for Node and pnpm (PLAN T006).
+# A regression on either leg fails the PR.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect surfaces
+    runs-on: ubuntu-latest
+    outputs:
+      has_js: ${{ steps.find.outputs.has_js }}
+      has_ts: ${{ steps.find.outputs.has_ts }}
+      has_tests: ${{ steps.find.outputs.has_tests }}
+      has_blocks: ${{ steps.find.outputs.has_blocks }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        shell: bash
+        run: |
+          has_js=$([ -f package.json ] && echo true || echo false)
+          has_ts=$([ -f tsconfig.json ] && echo true || echo false)
+          has_tests=$([ -d test ] || [ -d tests ] || [ -d __tests__ ] && echo true || echo false)
+          has_blocks=$([ -d src/blocks ] || [ -d blocks ] && echo true || echo false)
+          {
+            echo "has_js=$has_js"
+            echo "has_ts=$has_ts"
+            echo "has_tests=$has_tests"
+            echo "has_blocks=$has_blocks"
+          } >> "$GITHUB_OUTPUT"
+
+  js-matrix:
+    name: JS/TS — Node ${{ matrix.node }} · pnpm ${{ matrix.pnpm }}
+    needs: detect
+    if: needs.detect.outputs.has_js == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+        pnpm: ['9', '11']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ matrix.pnpm }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run --if-present lint
+      - name: Type-check
+        if: needs.detect.outputs.has_ts == 'true'
+        run: pnpm run --if-present typecheck
+      - name: Unit tests
+        if: needs.detect.outputs.has_tests == 'true'
+        run: pnpm run --if-present test
+      - name: Build
+        run: pnpm run --if-present build
+
+  i18n:
+    name: i18n linter
+    needs: detect
+    if: needs.detect.outputs.has_js == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check every user-facing string is wrapped
+        run: |
+          if [ -f tools/i18n-linter/check.mjs ]; then
+            node tools/i18n-linter/check.mjs
+          else
+            echo "i18n linter not yet present (lands in T035) — skipping."
+          fi
+
+  accessibility:
+    name: Accessibility (axe-core)
+    needs: detect
+    if: needs.detect.outputs.has_blocks == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: axe-core sweep
+        run: pnpm run --if-present a11y
+
+  lighthouse:
+    name: Lighthouse CI (mobile ≥ 90)
+    needs: detect
+    if: needs.detect.outputs.has_blocks == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Lighthouse CI
+        run: pnpm run --if-present lighthouse
+
+  scaffold-only-pass:
+    name: Scaffold pass (no application code yet)
+    needs: detect
+    if: needs.detect.outputs.has_js == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "wellworth-theme is currently scaffold-only (no package.json)."
+          echo "JS/TS, accessibility, and Lighthouse jobs activate once T036 lands theme code."
+          echo "PR template + secret scan + progress-check still apply."
